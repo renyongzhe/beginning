@@ -1,0 +1,1 @@
+ awk -F '\t' '{OFS="\t";split($76,a,":");split(a[2],b,",");for(i=1;i<=length(b);i++){total+=b[i];};var=total-b[1];fre=var/total;print fre,$0;total=0}'
