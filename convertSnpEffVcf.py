@@ -9,7 +9,9 @@ import argparse
 parse = argparse.ArgumentParser(description="This script used for picking up the acceptable transcript and formating output.")
 parse.add_argument("vcf",help="Input the SnpEff vcf")
 parse.add_argument('-c','--cDNA',action='store_true',help="Count the transcript's cDNA length")
-parse.add_argument('-C','--CDS',action='store_true',help="Count the transcript's CDS length")
+parse.add_argument('-C','--CDS',action='store_true',help="Count the transcript's CDS length.[default]")
+parse.add_argument('-f','--first',action='store_true',help="Pick up the first ANN annotation.")
+
 args = parse.parse_args()
 
 
@@ -22,7 +24,9 @@ class Transcripts(object):
 
 	# from annotation get NM or NR id
 	def GetTransID(self):
-		transNames = [ re.search("\|(N[M|R]_.*?)\|",i).group(1) for i in self.choose if re.search("N[M|R]_",i) ]
+		# only retain NR_022014.1(HMGN2P46), NR_001566.1(TERC) in /fastdisk/pipeline-programs/SnpEff/snpEff/data/hg19/genes.refseq
+		transNames = [re.search("\|(NM_.*?|NR_022014.*?|NR_001566.*?)\|",i).group(1) for i in self.choose if re.search("\|(NM_.*?|NR_022014.*?|NR_001566.*?)\|",i) ]
+		# print transNames
 		return transNames
 
 	# filter harmful class
@@ -56,19 +60,28 @@ class Transcripts(object):
 		transLength = []
 		transList_out = []
 		transNMs = self.GetTransID()
-		for transID_pre in transNMs:
-			transID = transID_pre.split(".")[0] if len(transID_pre.split(".")) > 1 else transID_pre
-			# count the length of transcript
-			if transID in transHash:
-				# Default the transID includ in transHash	
-				transLength.append(transHash[transID])
-		transLengthMax = max(transLength)
-		transLengthMaxCount = transLength.count(transLengthMax)
-		for index in range(0, transLengthMaxCount):
-			tmpIndex = transLength.index(transLengthMax)
-			transList_out.append(self.choose[tmpIndex])
-			transLength[tmpIndex] =  transLengthMax - 1
-		self.choose = transList_out
+		if len(transNMs) == 0:
+			self.choose = []
+			# print "---",transNMs
+		else:
+			#print transNMs
+			for transID_pre in transNMs:
+				transID = transID_pre.split(".")[0] if len(transID_pre.split(".")) > 1 else transID_pre
+
+				# count the length of transcript
+				#print transID
+				if transID in transHash:
+					#print transID,"******"
+					# Default the transID includ in transHash	
+					transLength.append(transHash[transID])
+			#print "error:::",transLength
+			transLengthMax = max(transLength)
+			transLengthMaxCount = transLength.count(transLengthMax)
+			for index in range(0, transLengthMaxCount):
+				tmpIndex = transLength.index(transLengthMax)
+				transList_out.append(self.choose[tmpIndex])
+				transLength[tmpIndex] =  transLengthMax - 1
+			self.choose = transList_out
 
 	# pick up the minimum transcript ID
 	def ChooseMiniNM(self):
@@ -85,9 +98,11 @@ class Transcripts(object):
 class Trans(object):
 	def __init__(self,transcript):
 		tmp = transcript.strip().split("\t")
-		self.ID = tmp[1]
+		# NM_001005221.2 
+		self.ID = tmp[1].split(".")[0]
 		self.gene = tmp[12]
 		self.strand = tmp[3]
+		self.cDNA_Start = tmp[4]
 		self.first_exon_start = int(tmp[6])
 		self.last_exon_end = int(tmp[7])
 		self.numExons_origin= int(tmp[8])
@@ -135,12 +150,15 @@ def GetNMLength():
 			transLenHash = {}
 			transNumHash = {}
 			geneStrand = {}
+			nmId_cDNAStart = {}
 			with open("/fastdisk/pipeline-programs/SnpEff/snpEff/data/hg19/genes.refseq") as fi:
 				for line in fi:
 					if line.startswith("#"):
 						continue
 					trans = Trans(line)
+					#geneStrand include strand information and cDNA start
 					geneStrand[trans.gene] = trans.strand
+					nmId_cDNAStart[trans.ID] = trans.cDNA_Start
 					if args.cDNA :
 						transLength = trans.GetcDNAlength()
 					else:
@@ -155,7 +173,7 @@ def GetNMLength():
 							transLenHash[trans.ID] = transLength
 			# for j in transLenHash:
 			# 	print "\t".join([j,str(transLenHash[j])])
-			return transLenHash,geneStrand
+			return transLenHash,geneStrand,nmId_cDNAStart
 
 def ConvertAA():
 	three = "Gly Ala Val Leu Ile Phe Trp Tyr Asp Asn Glu Lys Gln Met Ser Thr Cys Pro His Arg"
@@ -166,7 +184,7 @@ def ConvertAA():
 	return AAHash
 
 def convert(filein):
-	transHash,geneStrand = GetNMLength()
+	transHash,geneStrand,nmId_cDNAStart = GetNMLength()
 	AAHash = ConvertAA()
 	NonHarmNum = 0
 	AllItems = 0 
@@ -174,10 +192,10 @@ def convert(filein):
 	transEqualLength = 0 
 	fileout = filein + ".filter"
 	with open(fileout,'w') as fo:
-		fo.write("CHROM	POS	ID	REF	ALT	QUAL	FILTER	Depth_Tumor	Depth_Normal	AF_Tumor	AF_Normal	Mut_Reads_Tumor	Mut_Reads_Normal	FR_Score	DP5_Tumor	Gene	TranscriptID	Strand	Type_1	Type_2	cDNA_Change	Protein_Change	Exon_Number"+"\n")
+		fo.write("#CHROM	POS	ID	REF	ALT	QUAL	FILTER	Depth_Tumor	Depth_Normal	AF_Tumor	AF_Normal	Mut_Reads_Tumor	Mut_Reads_Normal	FR_Score	DP5_Tumor	Gene	TranscriptID	Strand	Type_1	Type_2	cDNA_Change	Protein_Change	Exon_Number	cDNA_Position	cDNA_Start"+"\n")
 		with open(filein) as fi:
 			for line in fi:
-				if not re.match("#",line):
+				if not re.match("[#\"]",line):
 					AllItems += 1 
 					tmp = line.strip().split("\t")
 					# get Type 2
@@ -195,7 +213,9 @@ def convert(filein):
 						Type_2 = "SNM"
 
 					# get tag information
+
 					info = tmp[7].split(";")
+					print tmp
 					for var in info:
 						if re.match("DP=",var):
 							Depth_T = var.split("=")[1]
@@ -216,38 +236,78 @@ def convert(filein):
 
 					# all transcripts will be NonHarmNum after filtering following rules
 					transcripts = [ item for item in tmp[7].split(";") if re.match("ANN",item) ][0].split("=")[1].split(",")
-					trans = Transcripts(transcripts)
-					trans.HarmfulClass()			
-			 		if len(trans.choose) == 1: # only one satisfies required class 
-						OutVirs = trans.choose[0].split("|")
 
-					else:
+					# chose the first ANN annotation without regard to other all rules
+					if args.first:
+						OutVirs = transcripts[0].split("|")
+					else:	
+					# our rules for picking up transcript
+						trans = Transcripts(transcripts)
+						# trans.HarmfulClass()
 						trans.GetNM()
-						if len(trans.choose) ==1 : # only one is NM,other is NR
+				 		if len(trans.choose) == 1: # only one satisfies required class 
 							OutVirs = trans.choose[0].split("|")
+
 						else:
-							NRsOrMultiNMs += 1
-							trans.ChooseMaxLength(transHash)
-							if len(trans.choose) == 1: # only one has the maximun transcript length
+							#trans.GetNM()
+							trans.HarmfulClass()
+							if len(trans.choose) ==1 : # only one is NM,other is NR
 								OutVirs = trans.choose[0].split("|")
 							else:
-								transEqualLength += 1
-								trans.ChooseMiniNM() # get minimum NM/NR ID, after all this steps,if still have same ID or equal length, catch the first
-								OutVirs = trans.choose[0].split("|")
-
+								NRsOrMultiNMs += 1
+								# print transcripts
+								trans.ChooseMaxLength(transHash)
+								# print "choose",trans.choose
+								if len(trans.choose) == 0:
+									continue
+								elif len(trans.choose) == 1: # only one has the maximun transcript length
+									OutVirs = trans.choose[0].split("|")
+								else:
+									transEqualLength += 1
+									trans.ChooseMiniNM() # get minimum NM/NR ID, after all this steps,if still have same ID or equal length, catch the first
+									OutVirs = trans.choose[0].split("|")
+									
 					ExonNum = OutVirs[8].split("/")[0]
 					Gene = OutVirs[3]
 					Strand = geneStrand[Gene] if Gene in geneStrand else "." # some special gene name is inconsistent
 					TranscriptID = OutVirs[6]
+					cDNA_Position = OutVirs[11].split("/")[0]
+					if TranscriptID in nmId_cDNAStart:
+						cDNAStart = nmId_cDNAStart[TranscriptID]
+					else:
+						raise KeyError("%s do not in genes.refseq"%TranscriptID)
 
+					# convert amino acid
 					if len(OutVirs[10]) != 0:
-						aa = re.search("p.([A-Z][a-z]{2})([0-9]*)(.*)",OutVirs[10])
-						OriginAA = AAHash[aa.group(1)] if aa.group(1) in AAHash else aa.group(1)
-						AltAA = AAHash[aa.group(3)] if aa.group(3) in AAHash else aa.group(3)
+						# print OutVirs[10]
+						aa = re.search("p.([A-z]*)([0-9]+)(.*)",OutVirs[10])
+						# p.TrpVal558LeuIle p.652
+						rawLen = len(aa.group(1))
+						# convert TrpVal to VW
+						if rawLen > 3:
+							OriginAAPre = []
+							for r1 in range(0,rawLen,3):
+								aa3 = aa.group(1)[r1:r1+3]
+								aa1 = AAHash[aa3] if aa3 in AAHash else aa3
+								OriginAAPre.append(aa1)
+							OriginAA = "".join(OriginAAPre)
+						else:
+							OriginAA = AAHash[aa.group(1)] if aa.group(1) in AAHash else aa.group(1)
+
+						mutLen = len(aa.group(3))
+						if mutLen > 3:
+							AltAAPre = []
+							for r2 in range(0,mutLen,3):
+								aa3 = aa.group(3)[r2:r2+3]
+								aa1 = AAHash[aa3] if aa3 in AAHash else aa3
+								AltAAPre.append(aa1)
+							AltAA = "".join(AltAAPre)
+						else:
+							AltAA = AAHash[aa.group(3)] if aa.group(3) in AAHash else aa.group(3)
 						AAchange = "p."+OriginAA+aa.group(2)+AltAA
 					else:
 						AAchange = "."
-					OutVir = "\t".join([Depth_T,Depth_N,AF_T,AF_N,str(Mut_Reads_T),str(Mut_Reads_N),FR_Score,DP5,Gene,TranscriptID,Strand,OutVirs[1],Type_2,OutVirs[9],AAchange,ExonNum])
+					OutVir = "\t".join([Depth_T,Depth_N,AF_T,AF_N,str(Mut_Reads_T),str(Mut_Reads_N),FR_Score,DP5,Gene,TranscriptID,Strand,OutVirs[1],Type_2,OutVirs[9],AAchange,ExonNum,cDNA_Position,cDNAStart])
 					Outmp = "\t".join(tmp[0:7])
 					#print "\t".join([Outmp,OutVir])
 					fo.write("\t".join([Outmp,OutVir])+"\n")
