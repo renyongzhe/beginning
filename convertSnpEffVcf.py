@@ -194,8 +194,8 @@ def GetNMLength():
 
 
 def ConvertAA():
-    three = "Gly Ala Val Leu Ile Phe Trp Tyr Asp Asn Glu Lys Gln Met Ser Thr Cys Pro His Arg"
-    one = "G A V L I F W Y D N E K Q M S T C P H R"
+    three = "Gly Ala Val Leu Ile Phe Trp Tyr Asp Asn Glu Lys Gln Met Ser Thr Cys Pro His Arg Ter"
+    one = "G A V L I F W Y D N E K Q M S T C P H R Ter"
     three_3 = three.split(" ")
     one_1 = one.split(" ")
     AAHash = dict(zip(three_3, one_1))
