@@ -1,0 +1,79 @@
+import requests  
+import bs4  
+import threading
+import multiprocessing
+
+scratch_url = "https://www.biosino.org/wepd/data/variant"
+data = requests.get(scratch_url).text
+soup = bs4.BeautifulSoup(data, "html.parser") 
+
+items = ['Variant ID','chrom', 'RS ID', 'Position', 'Reference', 'Allele', 'Variant Type','Gene Name', 'Gene Region', 'Flank Sequence', 'Create time', 'Last update', 'Allele Count',\
+         'Allele Number', 'Allele Frequency', 'Nanning Allele Count', 'Nanning Allele Number', 'Nanning Allele Frequency', 'Taizhou Allele Count', \
+             'Taizhou Allele Number', 'Taizhou Allele Frequency', 'Zhengzhou Allele Count', 'Zhengzhou Allele Number', 'Zhengzhou Allele Frequency', \
+                 'Others Allele Count', 'Others Allele Number', 'Others Allele Frequency']
+
+class downloader():
+    def __init__(self,url):
+        self.url = url
+
+    def down(self,infos,items):
+        out_info = []
+        detail = requests.get(self.url).text
+        detail_parse = bs4.BeautifulSoup(detail, "html.parser")
+        for j in detail_parse.find_all("div",class_="detail-group"):
+            label = j.label.text
+            values = j.text.rstrip().replace("\n"," ").split(" ")[-1]
+            infos[label] = values
+        
+        for it in items:
+            out_info.append(infos.get(it,"."))
+        print("\t".join(out_info))
+
+cpun = multiprocessing.cpu_count() 
+
+def parseHTML(soup):
+    page = ""
+    num = ""
+    pool_down = []
+    for i in soup.find_all("a",class_="data-box"):
+        infos = {}
+        chro = i.find_all("li")[2].text.split(" ")[-1]
+        infos["chrom"] = chro
+
+        idlink = i.attrs["href"].split("/")[-1]  # i.get("href")
+        item = downloader(scratch_url + "/" + idlink)
+        item.down(infos,items)
+
+        pool_down.append(multiprocessing.Process(target = item.down,args=(infos,items)))
+
+        # mut_detail = requests.get(scratch_url + "/" + idlink).text
+        # mut_detail_parse = bs4.BeautifulSoup(mut_detail, "html.parser") 
+     
+        # for j in mut_detail_parse.find_all("div",class_="detail-group"):
+        #     label = j.label.text
+        #     values = j.text.rstrip().replace("\n"," ").split(" ")[-1]
+        #     infos[label] = values
+        # for it in items:
+        #     out_info.append(infos.get(it,"."))
+        # print("\t".join(out_info))
+    for cc in pool_down:
+        cc.start()
+    for jj in pool_down:
+        jj.join()
+
+    nextone = soup.find_all("a",class_="page-link")[-1].get("onclick")
+    if nextone:
+        pages = nextone.replace("'","").replace(")","").split(",")
+        page = pages[-2]
+        num = pages[-1]
+    return page,num
+
+page_now,num_now = parseHTML(soup)
+while True:
+    if page_now and num_now:
+        formdata = {"queryWord":"","page":page_now,"size":num_now}
+        data = requests.post(scratch_url,data=formdata).text
+        soup = bs4.BeautifulSoup(data, "html.parser") 
+        page_now,num_now = parseHTML(soup)
+    else:
+        break
